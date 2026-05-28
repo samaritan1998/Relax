@@ -21,6 +21,7 @@ from transformers import AutoConfig, AutoTokenizer
 
 from relax.distributed.checkpoint_service.client.engine import create_client
 from relax.distributed.ray.train_actor import TrainRayActor
+from relax.engine.rollout.sft_rollout import get_sft_debug_data
 from relax.utils import tracking_utils
 from relax.utils.async_utils import run
 from relax.utils.data.stream_dataloader import (
@@ -391,7 +392,21 @@ class MegatronTrainRayActor(TrainRayActor):
         if self.args.debug_train_only:
             logger.info(f"start to get rollout_id: {rollout_id} data from transfer queue for debug with mcore.")
             batch_size = self.args.global_batch_size // mpu.get_data_parallel_world_size(with_context_parallel=False)
-            rollout_data = get_debug_data(self.args, rollout_id, batch_size, dp_rank=mpu.get_data_parallel_rank())
+            if self.args.load_debug_rollout_data is not None:
+                rollout_data = get_debug_data(self.args, rollout_id, batch_size, dp_rank=mpu.get_data_parallel_rank())
+            elif self.args.loss_type == "sft_loss" and self.args.prompt_data is not None:
+                rollout_data = get_sft_debug_data(
+                    self.args,
+                    rollout_id,
+                    batch_size,
+                    dp_rank=mpu.get_data_parallel_rank(),
+                    dp_size=mpu.get_data_parallel_world_size(with_context_parallel=False),
+                )
+            else:
+                raise ValueError(
+                    "debug_train_only requires either --load-debug-rollout-data or "
+                    "--loss-type sft_loss with --prompt-data."
+                )
             post_process_rollout_data(self.args, rollout_data)
 
             if self.role == "critic":
